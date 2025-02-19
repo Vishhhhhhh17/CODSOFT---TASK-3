@@ -1,0 +1,77 @@
+import tensorflow as tf
+from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.layers import Embedding, LSTM, Dense, Input
+from tensorflow.keras.models import Model
+import numpy as np
+from PIL import Image
+
+# Load pre-trained ResNet50 (without top layer)
+image_model = ResNet50(weights="imagenet", include_top=False, pooling="avg")
+
+def extract_features(image_path):
+    img = Image.open(image_path).resize((224, 224))
+    img = np.array(img)
+    img = np.expand_dims(img, axis=0)
+    img = preprocess_input(img)
+    features = image_model.predict(img)
+    return features
+
+# Sample captions for training
+captions = [
+    "a dog running in the field",
+    "a cat sitting on a table",
+    "a man riding a bike"
+]
+
+# Tokenize captions
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(captions)
+vocab_size = len(tokenizer.word_index) + 1
+
+# Convert captions to sequences
+sequences = tokenizer.texts_to_sequences(captions)
+max_length = max(len(seq) for seq in sequences)
+
+# Pad sequences
+sequences = pad_sequences(sequences, maxlen=max_length, padding="post")
+
+# Define the LSTM model
+image_input = Input(shape=(2048,))
+image_features = Dense(256, activation="relu")(image_input)
+
+caption_input = Input(shape=(max_length,))
+caption_embedding = Embedding(vocab_size, 256, mask_zero=True)(caption_input)
+lstm_out = LSTM(256)(caption_embedding)
+
+merged = tf.keras.layers.add([image_features, lstm_out])
+output = Dense(vocab_size, activation="softmax")(merged)
+
+model = Model(inputs=[image_input, caption_input], outputs=output)
+model.compile(loss="categorical_crossentropy", optimizer="adam")
+
+# Dummy training data (for demonstration)
+X_image = np.random.rand(len(sequences), 2048)
+X_text = np.array(sequences)
+y = np.random.rand(len(sequences), vocab_size)
+
+# Train the model (for real use, train on a larger dataset)
+model.fit([X_image, X_text], y, epochs=10, verbose=1)
+
+# Caption generation function
+def generate_caption(image_path):
+    features = extract_features(image_path)
+    caption = ["start"]
+    for _ in range(max_length):
+        seq = tokenizer.texts_to_sequences([caption])[0]
+        seq = pad_sequences([seq], maxlen=max_length, padding="post")
+        pred = model.predict([features, seq])
+        word = tokenizer.index_word[np.argmax(pred)]
+        caption.append(word)
+        if word == "end":
+            break
+    return " ".join(caption[1:-1])
+
+# Test the model with an image
+print("Generated Caption:", generate_caption("sample_image.jpg"))
